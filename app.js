@@ -149,14 +149,20 @@ function loadEmpathyData() {
         .then((snapshot) => {
             if (snapshot.exists()) {
                 empathyData = snapshot.val();
+                console.log('공감 표시 데이터 로드 완료:', empathyData);
             } else {
                 // 초기 데이터 설정
+                empathyData = {};
                 database.ref('empathy').set(empathyData);
+                console.log('초기 공감 표시 데이터 설정');
             }
             updateEmpathyDisplay();
         })
         .catch((error) => {
             console.error('공감 표시 데이터 로드 실패:', error);
+            // 로드 실패 시 빈 객체로 초기화
+            empathyData = {};
+            updateEmpathyDisplay();
         });
 }
 
@@ -167,14 +173,19 @@ function loadUserEmpathy() {
         .then((snapshot) => {
             if (snapshot.exists()) {
                 userEmpathy = snapshot.val();
+                console.log('사용자 공감 표시 데이터 로드 완료:', userEmpathy);
             } else {
                 userEmpathy = {};
                 database.ref(`userEmpathy/${userId}`).set(userEmpathy);
+                console.log('초기 사용자 공감 표시 데이터 설정');
             }
             updateUserEmpathyDisplay();
         })
         .catch((error) => {
             console.error('사용자 공감 표시 데이터 로드 실패:', error);
+            // 로드 실패 시 빈 객체로 초기화
+            userEmpathy = {};
+            updateUserEmpathyDisplay();
         });
 }
 
@@ -184,39 +195,40 @@ function setupRealTimeUpdates() {
     empathyRef.on('value', (snapshot) => {
         if (snapshot.exists()) {
             empathyData = snapshot.val();
+            console.log('실시간 공감 표시 데이터 업데이트:', empathyData);
+            updateEmpathyDisplay();
+        } else {
+            empathyData = {};
             updateEmpathyDisplay();
         }
     });
-}
-
-// 공감 표시 토글
-function toggleEmpathy(declarationId) {
-    const empathyButton = document.querySelector(`#empathy-count-${declarationId}`).previousElementSibling;
-    const isEmpathized = userEmpathy[declarationId] || false;
-    
-    if (isEmpathized) {
-        // 공감 표시 취소
-        empathyButton.classList.remove('empathized');
-        removeEmpathy(declarationId);
-    } else {
-        // 공감 표시 추가
-        empathyButton.classList.add('empathized');
-        addEmpathy(declarationId);
-    }
 }
 
 // 공감 표시 추가
 function addEmpathy(declarationId) {
     // 사용자 상태 업데이트
     userEmpathy[declarationId] = true;
-    database.ref(`userEmpathy/${userId}/${declarationId}`).set(true);
+    
+    // Firebase에 사용자 상태 저장
+    database.ref(`userEmpathy/${userId}/${declarationId}`).set(true)
+        .then(() => {
+            console.log('사용자 공감 표시 상태 저장 완료');
+        })
+        .catch((error) => {
+            console.error('사용자 상태 저장 실패:', error);
+        });
     
     // 전체 공감 표시 수 업데이트
     const empathyRef = database.ref(`empathy/${declarationId}`);
     empathyRef.transaction((currentData) => {
-        return (currentData || 0) + 1;
+        const newCount = (currentData || 0) + 1;
+        console.log(`선언문 ${declarationId}: ${currentData || 0} → ${newCount}`);
+        return newCount;
     }).then(() => {
         console.log('공감 표시가 추가되었습니다.');
+        // 성공 시 로컬 데이터도 업데이트
+        empathyData[declarationId] = (empathyData[declarationId] || 0) + 1;
+        updateEmpathyDisplay();
     }).catch((error) => {
         console.error('공감 표시 추가 실패:', error);
         alert('공감 표시 추가에 실패했습니다. 다시 시도해주세요.');
@@ -230,17 +242,32 @@ function addEmpathy(declarationId) {
 function removeEmpathy(declarationId) {
     // 사용자 상태 업데이트
     userEmpathy[declarationId] = false;
-    database.ref(`userEmpathy/${userId}/${declarationId}`).remove();
+    
+    // Firebase에서 사용자 상태 제거
+    database.ref(`userEmpathy/${userId}/${declarationId}`).remove()
+        .then(() => {
+            console.log('사용자 공감 표시 상태 제거 완료');
+        })
+        .catch((error) => {
+            console.error('사용자 상태 제거 실패:', error);
+        });
     
     // 전체 공감 표시 수 업데이트
     const empathyRef = database.ref(`empathy/${declarationId}`);
     empathyRef.transaction((currentData) => {
         if (currentData && currentData > 0) {
-            return currentData - 1;
+            const newCount = currentData - 1;
+            console.log(`선언문 ${declarationId}: ${currentData} → ${newCount}`);
+            return newCount;
         }
         return 0;
     }).then(() => {
         console.log('공감 표시가 제거되었습니다.');
+        // 성공 시 로컬 데이터도 업데이트
+        if (empathyData[declarationId] && empathyData[declarationId] > 0) {
+            empathyData[declarationId] -= 1;
+        }
+        updateEmpathyDisplay();
     }).catch((error) => {
         console.error('공감 표시 제거 실패:', error);
         alert('공감 표시 제거에 실패했습니다. 다시 시도해주세요.');
@@ -429,6 +456,28 @@ function exportData() {
     
     document.getElementById('adminPassword').value = '';
     alert('데이터가 성공적으로 내보내졌습니다.');
+}
+
+// 공감 표시 토글
+function toggleEmpathy(declarationId) {
+    console.log(`공감 표시 토글 시도: 선언문 ${declarationId}`);
+    
+    const empathyButton = document.querySelector(`#empathy-count-${declarationId}`).previousElementSibling;
+    const isEmpathized = userEmpathy[declarationId] || false;
+    
+    console.log(`현재 상태: ${isEmpathized ? '공감 표시됨' : '공감 표시 안됨'}`);
+    
+    if (isEmpathized) {
+        // 공감 표시 취소
+        console.log('공감 표시 취소 시도');
+        empathyButton.classList.remove('empathized');
+        removeEmpathy(declarationId);
+    } else {
+        // 공감 표시 추가
+        console.log('공감 표시 추가 시도');
+        empathyButton.classList.add('empathized');
+        addEmpathy(declarationId);
+    }
 }
 
 // 전역 함수로 노출 (HTML에서 호출하기 위해)
